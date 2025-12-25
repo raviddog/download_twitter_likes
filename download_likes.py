@@ -123,9 +123,6 @@ def scrape_tweets():
                 if "analytics" in href:
                     continue
 
-                # Check for duplicate
-                if check_url(href):
-                    continue                
 
                 # Grab tweet details
                 # account, post id, date, img count
@@ -135,6 +132,11 @@ def scrape_tweets():
                 tweet_timestamp = find_tweet_timestamp_post_snowflake(tweet_id)
                 tweet_datetime = datetime.fromtimestamp(tweet_timestamp / 1e3, tz=timezone.utc)
                 tweet_date = tweet_datetime.strftime("%Y%m%d_%H%M%S")
+                
+                # Check for duplicate
+                if check_url(href):
+                    print(f"Already downloaded: {tweet_acct} - {tweet_id} ({tweet_date})")
+                    continue                
 
                 img_count = 1
                 vid_count = 1
