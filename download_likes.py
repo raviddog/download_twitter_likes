@@ -10,6 +10,8 @@ import urllib.request
 from datetime import datetime
 from datetime import timezone
 
+seen_urls = set()
+
 def login():
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=False)
@@ -53,7 +55,7 @@ def save_file(url, filename, folder="images"):
     urllib.request.urlretrieve(url, filepath)
     return filepath
 
-def check_url(url):
+def db_check_url(url):
     cur.execute(f"SELECT * FROM downloaded WHERE url = '{url}'")
     result = cur.fetchone()
     if result:
@@ -63,6 +65,12 @@ def check_url(url):
 def db_add_url(url):
     cur.execute(f"INSERT INTO downloaded (url) VALUES ('{url}')")
     con.commit()
+
+def db_load_all_urls():
+    cur.execute("SELECT url FROM downloaded")
+    query = cur.fetchall()
+    for url in query:
+        seen_urls.add(url[0])
 
 def set_file_modified_time(filename, time):
     ctime = os.path.getctime(filename)
@@ -89,11 +97,11 @@ def scrape_tweets():
         # Browse to profile likes page
         profile = page.query_selector('a[aria-label="Profile"]')
         if not profile:
-            print("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
+            input("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
             return
         account = profile.get_attribute("href")
         if not account:
-            print("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
+            input("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
             return
         account = account.strip('/')
 
@@ -101,7 +109,7 @@ def scrape_tweets():
         page.wait_for_timeout(5000)
         print("Loaded Likes page, now downloading...")
 
-        while not finished:
+        while True:
             page.mouse.wheel(0, 2000)
             delay = random.uniform(2.5, 3)
             page.wait_for_timeout(delay * 1000)
@@ -115,7 +123,7 @@ def scrape_tweets():
                     continue
 
                 href = link.get_attribute("href")
-                
+
                 # Make sure its the tweet link
                 if "photo" in href:
                     continue
@@ -123,6 +131,9 @@ def scrape_tweets():
                 if "analytics" in href:
                     continue
 
+                if href in seen_urls:
+                    count += 1
+                    continue
 
                 # Grab tweet details
                 # account, post id, date, img count
@@ -134,8 +145,9 @@ def scrape_tweets():
                 tweet_date = tweet_datetime.strftime("%Y%m%d_%H%M%S")
                 
                 # Check for duplicate
-                if check_url(href):
-                    print(f"Already downloaded: {tweet_acct} - {tweet_id} ({tweet_date})")
+                if db_check_url(href):
+                    print(f"Already downloaded: {tweet_acct} - {tweet_id} ({tweet_date}) {href}")
+                    count += 1
                     continue                
 
                 img_count = 1
@@ -168,6 +180,7 @@ def scrape_tweets():
                     set_file_modified_time(filepath, tweet_timestamp / 1e3)
 
                 db_add_url(href)
+                seen_urls.add(href)
 
                 count += 1
 
@@ -188,5 +201,7 @@ if __name__ == "__main__":
 
     con = sqlite3.connect("downloaded.db")
     cur = con.cursor()
+
+    db_load_all_urls()
 
     scrape_tweets()
