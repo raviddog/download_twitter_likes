@@ -69,9 +69,10 @@ def download_m3u8(vid_url, filename, folder="images"):
     if response.status_code == 200:
         playlist = response.text
         if "/amplify_video/" not in playlist:
-            print(playlist)
-            return ""
+            if "/ext_tw_video/" not in playlist:
+                return ""
         playlist = playlist.replace("/amplify_video/", "https://video.twimg.com/amplify_video/")
+        playlist = playlist.replace("/ext_tw_video/", "https://video.twimg.com/ext_tw_video/")
 
         with open("playlist.m3u8", 'w') as file:
             file.write(playlist)
@@ -223,13 +224,15 @@ def scrape_tweets():
                     # Need to process these in new page, as they aren't linked by the page, instead they're downloaded resources
                     if tweet_content:
                         # Get list of video thumbnails to match to video resources in order to filter out ads on the new page
-                        video_previews = article.query_selector_all('video[poster*="https://pbs.twimg.com/amplify_video_thumb/"]')
+                        video_previews = article.query_selector_all('video[poster*="https://pbs.twimg.com/"]')
                         requested_paths = []
                         for video_preview in video_previews:
                             preview_url = video_preview.get_attribute("poster")
                             components = preview_url.rsplit('/')
+                            print(components)
                             # https://pbs.twimg.com/amplify_video_thumb/2004519052635672576/img/bxOr4K477Cb0pUqW.jpg
-                            requested_paths.append(components[-3])
+                            # https://pbs.twimg.com/ext_tw_video_thumb/1965409989553782788/pu/img/YP624KoFpwGTn2xD.jpg
+                            requested_paths.append(components[4])
 
                         # Create new context to avoid caching the requests
                         context2 = browser.new_context(storage_state="twitter_session.json")
@@ -240,7 +243,7 @@ def scrape_tweets():
                             paths.append(request.url)
                             route.continue_()
 
-                        route_glob = "https://video.twimg.com/amplify_video/**/*.m3u8?*"
+                        route_glob = "https://video.twimg.com/**/*.m3u8?*"
                         video_page.route(route_glob, lambda route, request: route_callback(route, request, paths))
                         video_page.goto(f"https://x.com{href}")
                         video_page.wait_for_timeout(3000)
