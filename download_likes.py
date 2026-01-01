@@ -132,8 +132,8 @@ def scrape_tweets():
         print("Loaded Likes page, now scrolling...")
 
         while True:
-            page.mouse.wheel(0, 100000)
-            delay = random.uniform(0.5, 1)
+            page.mouse.wheel(0, 20000)
+            delay = random.uniform(1.5, 2)
             page.wait_for_timeout(delay * 1000)
 
             articles = page.query_selector_all("article")
