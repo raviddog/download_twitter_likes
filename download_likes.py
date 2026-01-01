@@ -229,7 +229,6 @@ def scrape_tweets():
                         for video_preview in video_previews:
                             preview_url = video_preview.get_attribute("poster")
                             components = preview_url.rsplit('/')
-                            print(components)
                             # https://pbs.twimg.com/amplify_video_thumb/2004519052635672576/img/bxOr4K477Cb0pUqW.jpg
                             # https://pbs.twimg.com/ext_tw_video_thumb/1965409989553782788/pu/img/YP624KoFpwGTn2xD.jpg
                             requested_paths.append(components[4])
