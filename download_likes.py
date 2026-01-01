@@ -10,8 +10,7 @@ from datetime import timezone
 
 seen_urls = set()
 
-ffmpeg_path = "D:/Files/Documents/Youtube/ffmpeg.exe"
-# ffmpeg_path = "ffmpeg.exe"
+ffmpeg_path = "ffmpeg.exe"
 ffmpeg_args = ' -protocol_whitelist "file,http,https,tcp,tls,crypto" -allowed_extensions ALL -hide_banner -loglevel error -y'
 
 ###
