@@ -4,13 +4,17 @@ import requests
 import sqlite3
 import json
 import random
-import asyncio
 import shutil
-import urllib.request
 from datetime import datetime
 from datetime import timezone
 
 seen_urls = set()
+
+ffmpeg_path = "D:/Files/Documents/Youtube/ffmpeg.exe"
+# ffmpeg_path = "ffmpeg.exe"
+ffmpeg_args = ' -protocol_whitelist "file,http,https,tcp,tls,crypto" -allowed_extensions ALL -hide_banner -loglevel error -y'
+
+###
 
 def login():
     with sync_playwright() as p:
@@ -48,12 +52,37 @@ def process_cookies():
 
     print("Cookies saved")
 
+###
 
 def save_file(url, filename, folder="images"):
-    os.makedirs(folder, exist_ok=True)
+    response = requests.get(url)
     filepath = os.path.join(folder, filename)
-    urllib.request.urlretrieve(url, filepath)
+    os.makedirs(folder, exist_ok=True)
+    if response.status_code == 200:
+        with open(filepath, 'wb') as file:
+            file.write(response.content)
     return filepath
+
+def download_m3u8(vid_url, filename, folder="images"):
+    response = requests.get(vid_url)
+    filepath = os.path.join(folder, filename)
+    os.makedirs(folder, exist_ok=True)
+    if response.status_code == 200:
+        playlist = response.text
+        if "/amplify_video/" not in playlist:
+            print(playlist)
+            return ""
+        playlist = playlist.replace("/amplify_video/", "https://video.twimg.com/amplify_video/")
+
+        with open("playlist.m3u8", 'w') as file:
+            file.write(playlist)
+
+        ffmpeg_command = f"{ffmpeg_path} {ffmpeg_args} -i playlist.m3u8 -c copy {filepath}"
+        os.system(ffmpeg_command)
+        return filepath
+    return ""
+
+###
 
 def db_check_url(url):
     cur.execute(f"SELECT * FROM downloaded WHERE url = '{url}'")
@@ -100,12 +129,12 @@ def scrape_tweets():
         account = account.strip('/')
 
         page.goto(f"https://x.com/{account}/likes")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(3000)
         print("Loaded Likes page, now scrolling...")
 
         while True:
-            page.mouse.wheel(0, 10000)
-            delay = random.uniform(2.5, 3)
+            page.mouse.wheel(0, 100000)
+            delay = random.uniform(0.5, 1)
             page.wait_for_timeout(delay * 1000)
 
             articles = page.query_selector_all("article")
@@ -157,11 +186,19 @@ def scrape_tweets():
                     vid_count = 1
 
                     # Grab tweet embedded images
-                    tweet_images = article.query_selector_all('img[src*="https://pbs.twimg.com/media/"]')
-                    for tweet_image in tweet_images:
-                        img_url = tweet_image.get_attribute("src")
-                        img_url_split = img_url.rsplit("?")
-                        img_url_download = img_url_split[0] + "?format=jpg&name=large"
+                    tweet_content = article.query_selector_all('img[src*="https://pbs.twimg.com/media/"]')
+                    for tweet_media in tweet_content:
+                        img_url = tweet_media.get_attribute("src")
+                        img_url_source = img_url.rsplit("?")
+                        if "jpg" in img_url_source[-1]:
+                            img_url_download = img_url_source[0] + "?format=jpg&name=orig"
+                        elif "png" in img_url_source[-1]:
+                            img_url_download = img_url_source[0] + "?format=png&name=orig"
+                        else:
+                            # Unknown format
+                            img_url_split = img_url.rsplit("/")
+                            print(f"Unknown image format for file {img_url_split[-1]}")
+                            continue
 
                         # format url
                         filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-img{img_count}.jpg"
@@ -170,17 +207,59 @@ def scrape_tweets():
                         filepath = save_file(img_url_download, filename)
                         set_file_modified_time(filepath, tweet_timestamp / 1e3)
                         
-                    # Grab tweet embedded videos
-                    tweet_images = article.query_selector_all('video[src*="https://video.twimg.com/tweet_video/"]')
-                    for tweet_image in tweet_images:
-                        img_url_download = tweet_image.get_attribute("src")
+                    # Grab tweet embedded gifs
+                    tweet_content = article.query_selector_all('video[src*="https://video.twimg.com/tweet_video/"]')
+                    for tweet_media in tweet_content:
+                        img_url_download = tweet_media.get_attribute("src")
 
                         # format url
-                        filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-vid{vid_count}.mp4"
-                        vid_count += 1
+                        filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-img{img_count}.mp4"
+                        img_count += 1
                         # save url
                         filepath = save_file(img_url_download, filename)
                         set_file_modified_time(filepath, tweet_timestamp / 1e3)
+
+                    # Grab tweet embedded videos using resource blobs
+                    tweet_content = article.query_selector_all('source[src*="blob:https://x.com/"]')
+                    # Need to process these in new page, as they aren't linked by the page, instead they're downloaded resources
+                    if tweet_content:
+                        # Get list of video thumbnails to match to video resources in order to filter out ads on the new page
+                        video_previews = article.query_selector_all('video[poster*="https://pbs.twimg.com/amplify_video_thumb/"]')
+                        requested_paths = []
+                        for video_preview in video_previews:
+                            preview_url = video_preview.get_attribute("poster")
+                            components = preview_url.rsplit('/')
+                            # https://pbs.twimg.com/amplify_video_thumb/2004519052635672576/img/bxOr4K477Cb0pUqW.jpg
+                            requested_paths.append(components[-3])
+
+                        # Create new context to avoid caching the requests
+                        context2 = browser.new_context(storage_state="twitter_session.json")
+                        video_page = context2.new_page()
+                        paths = []
+
+                        def route_callback(route, request, paths):
+                            paths.append(request.url)
+                            route.continue_()
+
+                        route_glob = "https://video.twimg.com/amplify_video/**/*.m3u8?*"
+                        video_page.route(route_glob, lambda route, request: route_callback(route, request, paths))
+                        video_page.goto(f"https://x.com{href}")
+                        video_page.wait_for_timeout(3000)
+                        video_page.unroute(route_glob)
+
+                        for path in paths:
+                            # Check that path corresponds to one of our tweet videos, and not some other content further down the page
+                            for requested_path in requested_paths:
+                                if requested_path in path:
+                                    filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-vid{vid_count}.mp4"
+                                    print(path)
+                                    vid_count += 1
+                                    filepath = download_m3u8(path, filename)
+                                    if filepath:
+                                        set_file_modified_time(filepath, tweet_timestamp / 1e3)
+
+                        video_page.close()
+                        context2.close()
 
                     db_add_url(href)
                     seen_urls.add(href)

@@ -15,6 +15,7 @@ Firefox: Cookie-Editor - https://addons.mozilla.org/en-US/firefox/addon/cookie-e
     pip install playwright
     playwright install
     ```
+- If you have `ffmpeg` installed, check that it's accessible in your PATH and then update the `ffmpeg_path` variable in the script to point to it
 - Run the script
 - It will prompt you to paste in a Twitter session cookie:
 
