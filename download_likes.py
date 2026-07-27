@@ -131,8 +131,11 @@ def scrape_tweets():
         page.goto(f"https://x.com/{account}/likes")
         page.wait_for_timeout(3000)
         print("Loaded Likes page, now scrolling...")
+        
+        dupe_count = 0
+        keep_running = True
 
-        while True:
+        while keep_running:
             page.mouse.wheel(0, 20000)
             delay = random.uniform(1.5, 2)
             page.wait_for_timeout(delay * 1000)
@@ -179,7 +182,11 @@ def scrape_tweets():
                         print(f"Already downloaded: {tweet_acct} - {tweet_id} ({tweet_date}) {href}")
                         if href not in seen_urls:
                             seen_urls.add(href)
+                        dupe_count += 1
                         count += 1
+                        if dupe_count >= 5:
+                            print("Counted 5 already downloaded tweets, exiting")
+                            keep_running = False
                         break                
 
                     img_count = 1
