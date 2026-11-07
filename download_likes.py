@@ -317,27 +317,41 @@ def scrape_specific_tweets(tweets):
 
         for href in tweets:
             # Validate user provided link
-            if "x.com" not in href:
-                continue
+            if "x.com" in href:
+                if "status" not in href:
+                    continue
+    
+                if "photo" in href:
+                    continue
+    
+                if "analytics" in href:
+                    continue
+    
+                if "media_tags" in href:
+                    continue
+            else:
+                # Check if user instead provided a previously downloaded tweet filename
+                # 01s_nab23-2047919935985430854-20260425_060535-img1
+                if "img" not in href:
+                    continue
 
-            if "status" not in href:
-                continue
+                file_sections = href.rsplit('-')
+                if len(file_sections) < 4:
+                    continue
 
-            if "photo" in href:
-                continue
-
-            if "analytics" in href:
-                continue
-
-            if "media_tags" in href:
-                continue
+                # Attempt to rewite into a tweet url
+                tweet_acct = file_sections[0]
+                tweet_id = file_sections[1]
+                href = f"https://x.com/{tweet_acct}/status/{tweet_id}"
 
             page.goto(href)
             page.wait_for_timeout(3000)
-            # page.wait_for_load_state("domcontentloaded")
 
             # Grab first article
             article = page.query_selector("article")
+
+            if article is None:
+                continue
 
             # Grab tweet details
             # account, post id, date, img count
