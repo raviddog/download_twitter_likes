@@ -310,7 +310,7 @@ def scrape_specific_tweets(tweets):
     count = 0
 
     with sync_playwright() as p:
-        browser = p.firefox.launch(headless=False)
+        browser = p.firefox.launch(headless=True)
         context = browser.new_context(storage_state="twitter_session.json")
         context.add_init_script(HOOK)
         page = context.new_page()
@@ -331,7 +331,6 @@ def scrape_specific_tweets(tweets):
                     continue
             else:
                 # Check if user instead provided a previously downloaded tweet filename
-                # 01s_nab23-2047919935985430854-20260425_060535-img1
                 if "img" not in href:
                     continue
 
@@ -457,7 +456,7 @@ def scrape_specific_tweets(tweets):
 if __name__ == "__main__":
     if not os.path.isfile("twitter_session.json"):
         process_cookies()
-        # print("❌ Login is currently blocked by X, and no existing cookies found.\nPlease save existing session cookies from your browser into a file \"twitter_session.json\" and try again.")
+        # print("Login is currently blocked by X, and no existing cookies found.\nPlease save existing session cookies from your browser into a file \"twitter_session.json\" and try again.")
         # quit()
         # login()
 
