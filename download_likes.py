@@ -428,6 +428,9 @@ def scrape_specific_tweets(tweets):
                 video_page.close()
                 context2.close()
 
+            href = href.replace("http://x.com", "")
+            href = href.replace("https://x.com", "")
+
             if not db_check_url(href):
                 db_add_url(href)
 
