@@ -35,11 +35,7 @@ Firefox: Cookie-Editor - https://addons.mozilla.org/en-US/firefox/addon/cookie-e
 - Press Enter 1-2 times
 - Wait
 
-There's no detection for when it's done, but as the script runs, it outputs how many tweets it's processed. So if there's no output for a while and the number of processed tweets is close to the number of likes displayed on your page, you can assume it's done and hit **Ctrl + C** to finish.
-
-All downloads are written to an sqlite database, to ensure no tweets are downloaded twice. So the script can be re-run without issue.
-
-**Note:** It's probably a good idea to delete the **twitter_session.json** file when you're done.
+All downloads are written to an sqlite database, to ensure no tweets are downloaded twice. So the script can be re-run without issue. It automatically exits once it hits 5 duplicate tweets.
 
 ---
 
