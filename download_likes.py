@@ -2,9 +2,9 @@ from playwright.sync_api import sync_playwright
 import os
 import requests
 import sqlite3
-import json
 import random
 import shutil
+import sys
 from datetime import datetime
 from datetime import timezone
 
@@ -12,6 +12,30 @@ seen_urls = set()
 
 ffmpeg_path = "ffmpeg.exe"
 ffmpeg_args = ' -protocol_whitelist "file,http,https,tcp,tls,crypto" -allowed_extensions ALL -hide_banner -loglevel error -y'
+
+###
+
+# InsensitiveX image age-restriction bypass
+# https://lacerta.es/insensitivex/
+
+HOOK = """
+(() => {
+  let value;
+  Object.defineProperty(window, '__INITIAL_STATE__', {
+    configurable: true,
+    enumerable: true,
+    set(newValue) {
+      try {
+        newValue.featureSwitch.customOverrides['rweb_age_assurance_flow_enabled'] = false;
+      } catch (e) {}
+      value = newValue;
+    },
+    get() {
+      return value;
+    }
+  });
+})();
+"""
 
 ###
 
@@ -45,6 +69,7 @@ def process_cookies():
     cookies = cookies.replace("no_restriction", "None")
     cookies = cookies.replace("unspecified", "None")
     cookies = cookies.replace("lax", "Lax")
+    cookies = cookies.replace("\"partitionKey\": null,", "")
 
     with open("twitter_session.json", "w") as f:
         f.write(cookies)
@@ -113,6 +138,7 @@ def scrape_tweets():
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=True)
         context = browser.new_context(storage_state="twitter_session.json")
+        context.add_init_script(HOOK)
         page = context.new_page()
         page.goto(url)
         page.wait_for_timeout(5000)
@@ -120,11 +146,11 @@ def scrape_tweets():
         # Browse to profile likes page
         profile = page.query_selector('a[aria-label="Profile"]')
         if not profile:
-            input("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
+            input("Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
             return
         account = profile.get_attribute("href")
         if not account:
-            input("⛔ Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
+            input("Error: couldn't find profile. Maybe your session cookies don't contain an active login.")
             return
         account = account.strip('/')
 
@@ -279,6 +305,137 @@ def scrape_tweets():
         
         browser.close()
 
+def scrape_specific_tweets(tweets):
+    print("Connecting to Twitter...")
+    count = 0
+
+    with sync_playwright() as p:
+        browser = p.firefox.launch(headless=False)
+        context = browser.new_context(storage_state="twitter_session.json")
+        context.add_init_script(HOOK)
+        page = context.new_page()
+
+        for href in tweets:
+            # Validate user provided link
+            if "x.com" not in href:
+                continue
+
+            if "status" not in href:
+                continue
+
+            if "photo" in href:
+                continue
+
+            if "analytics" in href:
+                continue
+
+            if "media_tags" in href:
+                continue
+
+            page.goto(href)
+            page.wait_for_timeout(3000)
+            # page.wait_for_load_state("domcontentloaded")
+
+            # Grab first article
+            article = page.query_selector("article")
+
+            # Grab tweet details
+            # account, post id, date, img count
+            tweet_url = href.rsplit("/")
+            tweet_id = tweet_url[-1]
+            tweet_acct = tweet_url[-3]
+            tweet_timestamp = find_tweet_timestamp_post_snowflake(tweet_id)
+            tweet_datetime = datetime.fromtimestamp(tweet_timestamp / 1e3, tz=timezone.utc)
+            tweet_date = tweet_datetime.strftime("%Y%m%d_%H%M%S")
+
+            img_count = 1
+            vid_count = 1
+
+            # Grab tweet embedded images
+            tweet_content = article.query_selector_all('img[src*="https://pbs.twimg.com/media/"]')
+            for tweet_media in tweet_content:
+                img_url = tweet_media.get_attribute("src")
+                img_url_source = img_url.rsplit("?")
+                if "jpg" in img_url_source[-1]:
+                    img_url_download = img_url_source[0] + "?format=jpg&name=orig"
+                elif "png" in img_url_source[-1]:
+                    img_url_download = img_url_source[0] + "?format=png&name=orig"
+                else:
+                    # Unknown format
+                    img_url_split = img_url.rsplit("/")
+                    print(f"Unknown image format for file {img_url_split[-1]}")
+                    continue
+
+                # format url
+                filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-img{img_count}.jpg"
+                img_count += 1
+                # save url
+                filepath = save_file(img_url_download, filename)
+                set_file_modified_time(filepath, tweet_timestamp / 1e3)
+                
+            # Grab tweet embedded gifs
+            tweet_content = article.query_selector_all('video[src*="https://video.twimg.com/tweet_video/"]')
+            for tweet_media in tweet_content:
+                img_url_download = tweet_media.get_attribute("src")
+
+                # format url
+                filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-img{img_count}.mp4"
+                img_count += 1
+                # save url
+                filepath = save_file(img_url_download, filename)
+                set_file_modified_time(filepath, tweet_timestamp / 1e3)
+
+            # Grab tweet embedded videos using resource blobs
+            tweet_content = article.query_selector_all('source[src*="blob:https://x.com/"]')
+            # Need to process these in new page, as they aren't linked by the page, instead they're downloaded resources
+            if tweet_content:
+                # Get list of video thumbnails to match to video resources in order to filter out ads on the new page
+                video_previews = article.query_selector_all('video[poster*="https://pbs.twimg.com/"]')
+                requested_paths = []
+                for video_preview in video_previews:
+                    preview_url = video_preview.get_attribute("poster")
+                    components = preview_url.rsplit('/')
+                    # https://pbs.twimg.com/amplify_video_thumb/2004519052635672576/img/bxOr4K477Cb0pUqW.jpg
+                    # https://pbs.twimg.com/ext_tw_video_thumb/1965409989553782788/pu/img/YP624KoFpwGTn2xD.jpg
+                    requested_paths.append(components[4])
+
+                # Create new context to avoid caching the requests
+                context2 = browser.new_context(storage_state="twitter_session.json")
+                video_page = context2.new_page()
+                paths = []
+
+                def route_callback(route, request, paths):
+                    paths.append(request.url)
+                    route.continue_()
+
+                route_glob = "https://video.twimg.com/**/*.m3u8?*"
+                video_page.route(route_glob, lambda route, request: route_callback(route, request, paths))
+                video_page.goto(f"https://x.com{href}")
+                video_page.wait_for_timeout(3000)
+                video_page.unroute(route_glob)
+
+                for path in paths:
+                    # Check that path corresponds to one of our tweet videos, and not some other content further down the page
+                    for requested_path in requested_paths:
+                        if requested_path in path:
+                            filename = f"{tweet_acct}-{tweet_id}-{tweet_date}-vid{vid_count}.mp4"
+                            print(path)
+                            vid_count += 1
+                            filepath = download_m3u8(path, filename)
+                            if filepath:
+                                set_file_modified_time(filepath, tweet_timestamp / 1e3)
+
+                video_page.close()
+                context2.close()
+
+            if not db_check_url(href):
+                db_add_url(href)
+
+            count += 1
+
+            print(f"Tweet #{count}: {tweet_acct} - {tweet_id} ({tweet_date}): processed {img_count-1} images, {vid_count-1} videos")
+
+        browser.close()
 
 if __name__ == "__main__":
     if not os.path.isfile("twitter_session.json"):
@@ -293,4 +450,7 @@ if __name__ == "__main__":
     con = sqlite3.connect("downloaded.db")
     cur = con.cursor()
 
-    scrape_tweets()
+    if len(sys.argv) > 1:
+        scrape_specific_tweets(sys.argv[1:])
+    else:
+        scrape_tweets()
